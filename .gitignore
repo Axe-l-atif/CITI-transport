@@ -1,0 +1,22 @@
+# Base de données locale
+citi.db
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+.venv/
+venv/
+env/
+
+# Binaire tunnel Cloudflare (téléchargé localement)
+cloudflared.exe
+
+# OS / éditeur
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

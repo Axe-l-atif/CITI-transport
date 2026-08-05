@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CTI Transport — Abidjan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css?v=20250619" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>html,body{background:#dc2626;}</style>
+</head>
+<body class="intro-active">
+
+  <!-- Cinématique — rouge → absorption points → blanc → CITI lettre par lettre → identification -->
+  <div id="intro-cinematic" class="intro-cinematic hidden" aria-hidden="true" tabindex="0">
+    <div class="intro-scene">
+      <div class="intro-bg-stage" aria-hidden="true">
+        <div class="intro-white-base"></div>
+        <div class="intro-red-sheet intro-red-sheet-1"></div>
+        <div class="intro-red-sheet intro-red-sheet-2"></div>
+        <div class="intro-red-flow" aria-hidden="true"></div>
+      </div>
+      <div class="intro-sky-citi">
+        <div class="brand-citi-giant intro-citi intro-citi-solid">
+          <span class="citi-char intro-letter intro-letter-1">C</span>
+          <span class="citi-char citi-i-wrap intro-letter intro-letter-2">
+            <span class="citi-i-dot citi-dot-plateau intro-absorb-dot"></span>
+            <span class="citi-i-stem">ı</span>
+          </span>
+          <span class="citi-char intro-letter intro-letter-3">T</span>
+          <span class="citi-char citi-i-wrap intro-letter intro-letter-4">
+            <span class="citi-i-dot citi-dot-zone intro-absorb-dot"></span>
+            <span class="citi-i-stem">ı</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    if (!sessionStorage.getItem("citi_skip_intro") && !sessionStorage.getItem("citi_session")) {
+      document.getElementById("intro-cinematic")?.classList.remove("hidden");
+    }
+  </script>
+
+  <!-- Identification -->
+  <div id="login-screen" class="login-screen hidden">
+    <div class="login-layout">
+      <div class="login-container">
+        <div id="auth-block" class="login-form">
+          <h2>Identification</h2>
+          <p class="login-desc">Une seule connexion — redirection automatique vers votre espace</p>
+
+          <div class="auth-tabs">
+            <button type="button" class="auth-tab active" data-auth-tab="login">Connexion</button>
+            <button type="button" class="auth-tab" data-auth-tab="register">Créer mon accès</button>
+          </div>
+
+          <form id="unified-login-form">
+            <label>
+              <span>Nom ou identifiant</span>
+              <input type="text" id="auth-identifier" autocomplete="username" required placeholder="Nom, CH-001, admin…" />
+            </label>
+            <label>
+              <span>Code personnel / mot de passe</span>
+              <input type="password" id="auth-password" autocomplete="current-password" required placeholder="Votre code secret" />
+            </label>
+            <button type="submit" class="btn btn-primary btn-full">Accéder à mon espace</button>
+          </form>
+
+          <form id="unified-register-form" class="hidden">
+            <label>
+              <span>Votre nom</span>
+              <input type="text" id="auth-register-name" autocomplete="name" required placeholder="Nom complet" />
+            </label>
+            <label>
+              <span>Créer mon code personnel</span>
+              <input type="password" id="auth-register-code" autocomplete="new-password" required minlength="4" />
+            </label>
+            <label>
+              <span>Confirmer le code</span>
+              <input type="password" id="auth-register-confirm" autocomplete="new-password" required minlength="4" />
+            </label>
+            <button type="submit" class="btn btn-secondary btn-full">Créer mon accès client</button>
+          </form>
+        </div>
+      </div>
+      <div class="brand-citi-giant brand-citi-mark brand-citi-login" aria-label="CITI">
+        <span class="citi-char">C</span>
+        <span class="citi-char citi-i-wrap">
+          <span class="citi-i-dot citi-dot-plateau"></span>
+          <span class="citi-i-stem">ı</span>
+        </span>
+        <span class="citi-char">T</span>
+        <span class="citi-char citi-i-wrap">
+          <span class="citi-i-dot citi-dot-zone"></span>
+          <span class="citi-i-stem">ı</span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Direction — code d'accès -->
+  <div id="direction-pending-screen" class="direction-pending-screen hidden">
+    <div class="direction-pending-inner">
+      <div class="brand-citi-giant brand-citi-mark brand-citi-pending" aria-label="CITI">
+        <span class="citi-char">C</span>
+        <span class="citi-char citi-i-wrap">
+          <span class="citi-i-dot citi-dot-plateau"></span>
+          <span class="citi-i-stem">ı</span>
+        </span>
+        <span class="citi-char">T</span>
+        <span class="citi-char citi-i-wrap">
+          <span class="citi-i-dot citi-dot-zone"></span>
+          <span class="citi-i-stem">ı</span>
+        </span>
+      </div>
+      <form id="direction-verify-form" class="direction-verify-form">
+        <p class="direction-verify-desc">Saisissez le code direction pour accéder à l'interface.</p>
+        <label>
+          <span>Code direction</span>
+          <input type="password" id="direction-verify-code" required placeholder="••••" autocomplete="off" inputmode="numeric" maxlength="8" />
+        </label>
+        <button type="submit" class="btn btn-primary btn-full">Valider le code</button>
+        <p id="direction-verify-feedback" class="direction-verify-feedback hidden"></p>
+        <button type="button" id="direction-pending-logout" class="btn btn-ghost btn-full">Déconnexion</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Interface Client -->
+  <div id="app-client" class="app-shell hidden">
+    <aside class="sidebar sidebar-client">
+      <div class="client-sidebar-head">
+        <div class="client-brand-row">
+          <div data-citi-logo="brand-citi-sidebar"></div>
+          <button type="button" id="client-menu-toggle" class="client-menu-toggle" aria-label="Menu options" aria-expanded="false" aria-controls="client-options-menu">
+            <span class="client-menu-bar"></span>
+            <span class="client-menu-bar"></span>
+            <span class="client-menu-bar"></span>
+          </button>
+        </div>
+        <div id="client-options-menu" class="client-options-menu hidden" role="menu" aria-label="Options client">
+          <div class="client-option-group">
+            <button type="button" class="client-option-item client-option-parent" data-client-menu="profile" aria-expanded="false" role="menuitem">
+              <span>Profil</span>
+              <span class="client-option-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="client-option-submenu hidden" data-client-submenu="profile">
+              <button type="button" class="client-option-subitem" data-client-profile="info" role="menuitem">Informations</button>
+              <button type="button" class="client-option-subitem" data-client-profile="security" role="menuitem">Sécurité</button>
+              <button type="button" class="client-option-subitem" data-client-profile="payments" role="menuitem">Mode de paiements</button>
+            </div>
+          </div>
+          <label class="client-option-item client-option-toggle" role="menuitem">
+            <span>Mode sombre</span>
+            <input type="checkbox" id="client-dark-mode-toggle" checked aria-label="Activer le mode sombre" />
+            <span class="client-toggle-track" aria-hidden="true"></span>
+          </label>
+          <div class="client-option-group">
+            <button type="button" class="client-option-item client-option-parent" data-client-menu="history" aria-expanded="false" role="menuitem">
+              <span>Historique</span>
+              <span class="client-option-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="client-option-submenu hidden" data-client-submenu="history">
+              <button type="button" class="client-option-subitem" data-client-history="trips" role="menuitem">Trajets</button>
+              <button type="button" class="client-option-subitem" data-client-history="subscription" role="menuitem">Abonnement</button>
+            </div>
+          </div>
+          <button type="button" class="client-option-item client-option-logout" data-client-option="logout" role="menuitem">Déconnexion</button>
+        </div>
+      </div>
+      <div class="client-stops-search">
+        <label class="client-stops-search-label" for="client-stops-search-input">Arrêts &amp; stations</label>
+        <div class="client-stops-search-row">
+          <span class="client-stops-search-icon" aria-hidden="true">🔍</span>
+          <input
+            type="search"
+            id="client-stops-search-input"
+            placeholder="Rechercher par zone, arrêt…"
+            autocomplete="off"
+            aria-controls="client-stops-search-results"
+            aria-expanded="false"
+          />
+        </div>
+        <div class="client-stops-zone-chips" id="client-stops-zone-chips" role="group" aria-label="Filtrer par zone">
+          <button type="button" class="client-zone-chip active" data-zone="all">Toutes</button>
+          <button type="button" class="client-zone-chip" data-zone="yopougon">Yopougon</button>
+          <button type="button" class="client-zone-chip" data-zone="koumassi">Koumassi</button>
+          <button type="button" class="client-zone-chip" data-zone="plateau">Plateau</button>
+          <button type="button" class="client-zone-chip" data-zone="marcory">Marcory</button>
+          <button type="button" class="client-zone-chip" data-zone="adjame">Adjamé</button>
+          <button type="button" class="client-zone-chip" data-zone="bingerville">Bingerville</button>
+        </div>
+        <div id="client-stops-search-results" class="client-stops-results hidden" role="listbox" aria-label="Résultats"></div>
+      </div>
+      <div class="client-sidebar-actions">
+        <button type="button" class="client-action-square client-subscription-square" data-client-option="subscription" aria-label="Mon abonnement">
+          <span class="client-action-label">Mon abonnement</span>
+        </button>
+        <button type="button" class="client-action-square client-reserve-square" data-goto="trips" aria-label="Réserver ma place">
+          <span class="client-action-label">Réserver ma place</span>
+        </button>
+        <button type="button" class="client-action-square client-vehicle-square" data-goto="trips" aria-label="Réserver un véhicule">
+          <span class="client-action-label">Réserver un véhicule</span>
+        </button>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar client-topbar">
+        <div id="client-topbar-itinerary" class="client-itinerary-panel">
+          <h2 class="client-itinerary-title">Itinéraire</h2>
+          <div id="client-itinerary-status" class="client-itinerary-status"></div>
+        </div>
+        <div class="client-topbar-titles hidden">
+          <h2 id="client-page-title">Itinéraire</h2>
+          <p id="client-page-subtitle" class="hidden"></p>
+        </div>
+        <div class="topbar-date" id="client-current-date"></div>
+      </header>
+
+      <section id="client-view-dashboard" class="view active">
+        <div class="stats-grid" id="client-stats-grid"></div>
+        <div class="content-grid-2">
+          <div class="card">
+            <div class="card-header"><h3>🚀 Réservez en 3 étapes</h3></div>
+            <div class="steps-row" id="client-steps"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3>💳 Moyens de paiement</h3></div>
+            <div id="client-payments-info" class="chips-row"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>Trajets disponibles cette semaine</h3>
+            <button class="btn btn-secondary btn-sm" data-goto="trips">Réserver maintenant</button>
+          </div>
+          <div id="client-dashboard-trips" class="trip-list"></div>
+        </div>
+        <div id="client-next-reservation" class="highlight-card hidden"></div>
+      </section>
+
+      <section id="client-view-trips" class="view">
+        <div class="info-banner">
+          <span>📍</span>
+          <div>
+            <strong>Lignes CTI Abidjan</strong>
+            <p>Plateau ↔ Yopougon · Cocody · Koumassi · Bingerville · Réservation sur 7 jours</p>
+          </div>
+        </div>
+        <div class="filters">
+          <label>Date <input type="date" id="client-trip-date-filter" /></label>
+          <p class="filter-hint" id="client-trip-date-hint"></p>
+          <button class="btn btn-primary" id="client-refresh-trips">Actualiser</button>
+        </div>
+        <div id="client-trips-list" class="trip-list"></div>
+      </section>
+
+      <section id="client-view-trip-detail" class="view">
+        <button class="btn btn-ghost back-btn" id="client-back-to-trips">← Retour aux trajets</button>
+        <div class="trip-detail-layout">
+          <div class="card trip-info-card" id="client-trip-info"></div>
+          <div class="card seat-map-card">
+            <div class="card-header">
+              <h3>Choisissez votre siège</h3>
+              <div class="seat-legend">
+                <span><i class="dot available"></i> Libre</span>
+                <span><i class="dot selected"></i> Sélectionné</span>
+                <span><i class="dot occupied"></i> Occupé</span>
+              </div>
+            </div>
+            <div id="client-seat-map" class="seat-map"></div>
+            <div class="seat-actions">
+              <div class="stop-select-row">
+                <label>
+                  <span>Arrêt de montée</span>
+                  <select id="client-pickup-stop">
+                    <option value="">— Choisir un arrêt —</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Arrêt de descente</span>
+                  <select id="client-dropoff-stop">
+                    <option value="">— Choisir un arrêt —</option>
+                  </select>
+                </label>
+              </div>
+              <p id="client-selected-seat-label">Sélectionnez un siège disponible</p>
+              <button class="btn btn-primary" id="client-confirm-reservation" disabled>Procéder au paiement</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="client-view-reservations" class="view">
+        <div class="info-banner client">
+          <span>🎫</span>
+          <div>
+            <strong>Vos réservations actives</strong>
+            <p>Consultez, téléchargez votre référence ou annulez avant le départ</p>
+          </div>
+        </div>
+        <div id="client-my-reservations" class="reservation-list"></div>
+      </section>
+
+      <section id="client-view-profile" class="view">
+        <nav class="client-subnav" id="client-profile-subnav" aria-label="Sections itinéraire">
+          <button type="button" class="client-subnav-btn active" data-profile-tab="info">Informations</button>
+          <button type="button" class="client-subnav-btn" data-profile-tab="security">Sécurité</button>
+          <button type="button" class="client-subnav-btn" data-profile-tab="payments">Mode de paiements</button>
+        </nav>
+        <div class="card client-profile-card">
+          <div id="client-profile-content"></div>
+        </div>
+      </section>
+
+      <section id="client-view-history" class="view">
+        <nav class="client-subnav" id="client-history-subnav" aria-label="Sections historique">
+          <button type="button" class="client-subnav-btn active" data-history-tab="trips">Trajets</button>
+          <button type="button" class="client-subnav-btn" data-history-tab="subscription">Abonnement</button>
+        </nav>
+        <div id="client-history-trips-panel">
+          <div id="client-history-list" class="reservation-list"></div>
+        </div>
+        <div id="client-history-subscription-panel" class="hidden">
+          <div id="client-history-subscription-content"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Interface Chauffeur -->
+  <div id="app-driver" class="app-shell hidden">
+    <aside class="sidebar sidebar-driver">
+      <div class="sidebar-brand">
+        <div data-citi-logo="brand-citi-sidebar"></div>
+        <span class="brand-role-pill driver">Chauffeur</span>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="dashboard"><span class="nav-icon">📋</span> Planning</button>
+        <button class="nav-item" data-view="passengers"><span class="nav-icon">👥</span> Embarquement</button>
+      </nav>
+      <div class="sidebar-help">
+        <p><strong>Consigne du jour</strong></p>
+        <p>Arrivée 10 min avant le départ · Vérifier la liste passagers</p>
+      </div>
+      <div class="user-panel">
+        <strong id="driver-user-name"></strong>
+        <button class="btn btn-ghost btn-full" id="logout-driver">Déconnexion</button>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h2 id="driver-page-title">Planning</h2>
+          <p id="driver-page-subtitle"></p>
+        </div>
+        <div class="topbar-date" id="driver-current-date"></div>
+      </header>
+
+      <section id="driver-view-dashboard" class="view active">
+        <div id="driver-hero"></div>
+        <div class="stats-grid" id="driver-stats-grid"></div>
+        <div class="content-grid-2">
+          <div class="card">
+            <div class="card-header"><h3>✅ Check-list avant départ</h3></div>
+            <ul class="checklist" id="driver-checklist"></ul>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3>📅 Programme du jour</h3></div>
+            <div id="driver-timeline" class="timeline"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Mes trajets assignés</h3></div>
+          <div id="driver-trips-list" class="trip-list"></div>
+        </div>
+      </section>
+
+      <section id="driver-view-passengers" class="view">
+        <div class="info-banner driver">
+          <span>👥</span>
+          <div>
+            <strong>Feuille d'embarquement</strong>
+            <p>Vérifiez chaque passager et son numéro de siège avant le départ</p>
+          </div>
+        </div>
+        <div id="driver-passengers-content"></div>
+      </section>
+
+      <section id="driver-view-trip-detail" class="view">
+        <button class="btn btn-ghost back-btn" id="driver-back-to-trips">← Retour au planning</button>
+        <div class="trip-detail-layout">
+          <div class="card trip-info-card" id="driver-trip-info"></div>
+          <div class="card">
+            <div class="card-header"><h3>Passagers à bord</h3></div>
+            <div id="driver-passenger-list" class="passenger-list"></div>
+            <div class="driver-trip-actions" id="driver-trip-actions"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Interface Direction -->
+  <div id="app-direction" class="app-shell hidden">
+    <aside class="sidebar sidebar-direction">
+      <div class="sidebar-brand">
+        <div data-citi-logo="brand-citi-sidebar"></div>
+        <span class="brand-role-pill direction">Direction</span>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="dashboard"><span class="nav-icon">📊</span> Pilotage</button>
+        <button class="nav-item" data-view="fleet"><span class="nav-icon">🗺️</span> Flotte live</button>
+        <button class="nav-item" data-view="trips"><span class="nav-icon">🛣️</span> Planification</button>
+        <button class="nav-item" data-view="vehicles"><span class="nav-icon">🚐</span> Véhicules</button>
+        <button class="nav-item" data-view="drivers"><span class="nav-icon">👨‍✈️</span> Chauffeurs</button>
+        <button class="nav-item" data-view="reservations"><span class="nav-icon">💰</span> Finances</button>
+      </nav>
+      <div class="sidebar-help">
+        <p><strong>Réseau CTI Abidjan</strong></p>
+        <p>5 véhicules · 5 chauffeurs · 7 jours de planification</p>
+      </div>
+      <div class="user-panel">
+        <strong id="direction-user-name"></strong>
+        <button class="btn btn-ghost btn-full" id="logout-direction">Déconnexion</button>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h2 id="direction-page-title">Pilotage</h2>
+          <p id="direction-page-subtitle"></p>
+        </div>
+        <div class="topbar-date" id="direction-current-date"></div>
+      </header>
+
+      <section id="direction-view-dashboard" class="view active">
+        <div id="direction-hero"></div>
+        <div class="stats-grid" id="direction-stats-grid"></div>
+        <div id="direction-alerts" class="alerts-row"></div>
+        <div class="direction-dashboard-grid">
+          <div class="card">
+            <div class="card-header"><h3>✅ Trajets effectués</h3><span class="badge badge-success" id="dash-completed-count">0</span></div>
+            <div id="direction-completed-trips" class="trip-list compact-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3>⏳ Trajets restants</h3><span class="badge badge-warning" id="dash-remaining-count">0</span></div>
+            <div id="direction-remaining-trips" class="trip-list compact-list"></div>
+          </div>
+        </div>
+        <div class="content-grid-2" style="margin-top:1rem">
+          <div class="card">
+            <div class="card-header"><h3>🚐 Composition de la flotte</h3></div>
+            <div id="direction-fleet-breakdown" class="fleet-breakdown"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3>Dernières réservations</h3></div>
+            <div id="direction-recent-reservations" class="reservation-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="direction-view-fleet" class="view">
+        <div class="info-banner direction">
+          <span>🗺️</span>
+          <div>
+            <strong>Centre de supervision flotte</strong>
+            <p>Positions GPS en direct · Statut des trajets · Disponibilité véhicules</p>
+          </div>
+        </div>
+        <div class="stats-grid" id="fleet-stats-grid"></div>
+        <div class="fleet-layout">
+          <div class="card map-card">
+            <div class="card-header">
+              <h3>Carte des véhicules</h3>
+              <button class="btn btn-ghost btn-sm" id="refresh-fleet-map">Actualiser</button>
+            </div>
+            <div id="fleet-map" class="fleet-map"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3>Inventaire flotte</h3><span class="badge badge-success" id="fleet-count-badge">0</span></div>
+            <div id="fleet-vehicle-list" class="fleet-list"></div>
+          </div>
+        </div>
+        <div class="direction-dashboard-grid" style="margin-top:1rem">
+          <div class="card">
+            <div class="card-header"><h3>Trajets clôturés</h3></div>
+            <div id="fleet-completed-trips" class="trip-list compact-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3>Trajets à venir</h3></div>
+            <div id="fleet-remaining-trips" class="trip-list compact-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="direction-view-trips" class="view">
+        <div class="info-banner direction">
+          <span>🛣️</span>
+          <div>
+            <strong>Planification des lignes</strong>
+            <p>4 rotations quotidiennes · 3 jours glissants · Affectation automatique</p>
+          </div>
+        </div>
+        <div id="direction-trips-list" class="trip-list"></div>
+      </section>
+
+      <section id="direction-view-vehicles" class="view">
+        <div class="info-banner direction">
+          <span>🚐</span>
+          <div>
+            <strong>Gestion de la flotte</strong>
+            <p>Ajoutez, modifiez ou retirez des véhicules — suivez ceux en trajet ou au dépôt</p>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:1rem">
+          <div class="card-header"><h3>Ajouter un véhicule</h3></div>
+          <form id="direction-add-vehicle-form" class="profile-form direction-vehicle-form">
+            <div class="direction-form-grid">
+              <label><span>Nom</span><input type="text" id="veh-name" required placeholder="Ex. Navette Plateau" /></label>
+              <label><span>Immatriculation</span><input type="text" id="veh-plate" required placeholder="CI-1234-AB" /></label>
+              <label><span>Capacité</span><input type="number" id="veh-capacity" required min="1" max="50" value="14" /></label>
+              <label><span>Type</span>
+                <select id="veh-type">
+                  <option value="gbaka">Gbaka</option>
+                  <option value="bus">Bus</option>
+                  <option value="minibus" selected>Minibus</option>
+                  <option value="berline">Berline</option>
+                </select>
+              </label>
+              <label><span>Chauffeur assigné</span><input type="text" id="veh-driver" placeholder="Nom du chauffeur" /></label>
+            </div>
+            <button type="submit" class="btn btn-primary">Ajouter le véhicule</button>
+          </form>
+        </div>
+        <div id="direction-vehicles-list" class="fleet-list"></div>
+      </section>
+
+      <section id="direction-view-drivers" class="view">
+        <div class="info-banner direction">
+          <span>👨‍✈️</span>
+          <div>
+            <strong>Suivi des chauffeurs</strong>
+            <p>Missions assignées, trajets effectués et performance par chauffeur</p>
+          </div>
+        </div>
+        <div id="direction-drivers-list" class="fleet-list"></div>
+        <div class="card" style="margin-top:1rem">
+          <div class="card-header"><h3>Clients par véhicule aujourd'hui</h3></div>
+          <div id="direction-clients-by-vehicle" class="fleet-list"></div>
+        </div>
+      </section>
+
+      <section id="direction-view-reservations" class="view">
+        <div class="info-banner direction">
+          <span>💰</span>
+          <div>
+            <strong>Suivi financier</strong>
+            <p>Recettes, modes de paiement et références de transaction</p>
+          </div>
+        </div>
+        <div id="direction-payment-summary" class="payment-summary-row"></div>
+        <div id="direction-all-reservations" class="reservation-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <div id="payment-modal" class="modal hidden">
+    <div class="modal-backdrop" id="payment-backdrop"></div>
+    <div class="modal-content card">
+      <div class="card-header">
+        <h3>Paiement CTI Abidjan</h3>
+        <button class="btn btn-ghost modal-close" id="close-payment-modal">✕</button>
+      </div>
+      <div class="payment-summary" id="payment-summary"></div>
+      <p class="payment-label">Choisissez votre moyen de paiement</p>
+      <div id="payment-methods" class="payment-methods"></div>
+      <div id="payment-phone-block" class="hidden">
+        <label class="payment-phone-label">
+          <span>Numéro Wave ou Orange Money</span>
+          <input type="tel" id="payment-phone" placeholder="07 XX XX XX XX" autocomplete="tel" />
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="cancel-payment">Annuler</button>
+        <button class="btn btn-primary" id="pay-and-reserve" disabled>Confirmer et réserver</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="subscription-modal" class="modal hidden">
+    <div class="modal-backdrop" id="subscription-backdrop"></div>
+    <div class="modal-content card">
+      <div class="card-header">
+        <h3>Abonnement CTI Abidjan</h3>
+        <button class="btn btn-ghost modal-close" id="close-subscription-modal">✕</button>
+      </div>
+      <div id="subscription-plans" class="payment-methods"></div>
+      <div id="subscription-phone-block">
+        <label class="payment-phone-label">
+          <span>Numéro Wave ou Orange Money</span>
+          <input type="tel" id="subscription-phone" placeholder="07 XX XX XX XX" />
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="cancel-subscription">Annuler</button>
+        <button class="btn btn-primary" id="confirm-subscription" disabled>Souscrire</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="/static/js/app.js?v=20250619"></script>
+</body>
+</html>
