@@ -23,6 +23,7 @@ APP_DIR = Path(__file__).parent
 DB_PATH = APP_DIR / "cti.db"
 TRIP_DAYS = 7
 DIRECTION_ACCESS_CODE = "2250"
+_db_initialized = False
 
 LOCATIONS = {
     "plateau": (5.3192, -4.0281),
@@ -485,6 +486,19 @@ def sync_trips(conn):
                 )
 
     conn.commit()
+
+
+def ensure_db():
+    global _db_initialized
+    if not _db_initialized:
+        init_db()
+        _db_initialized = True
+
+
+@app.before_request
+def prepare_db():
+    if request.path != "/health":
+        ensure_db()
 
 
 @app.route("/")
@@ -1999,7 +2013,7 @@ def local_ip():
 
 
 def run_server():
-    init_db()
+    ensure_db()
     host = os.environ.get("CITI_HOST", "0.0.0.0")
     port = int(os.environ.get("CITI_PORT", "5000"))
     debug = os.environ.get("CITI_DEBUG", "0").lower() in ("1", "true", "yes")
@@ -2027,5 +2041,3 @@ def run_server():
 
 if __name__ == "__main__":
     run_server()
-else:
-    init_db()
