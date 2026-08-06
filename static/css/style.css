@@ -1194,7 +1194,8 @@ body.app-active .citi-i-dot {
   margin-bottom: 0.35rem;
 }
 
-.profile-form input {
+.profile-form input,
+.profile-form select {
   width: 100%;
   padding: 0.6rem 0.75rem;
   border-radius: 8px;
@@ -2590,6 +2591,129 @@ body.app-active .citi-i-dot {
   background: var(--surface);
   color: var(--text);
   font: inherit;
+}
+
+.payment-instructions {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 0.88rem;
+}
+
+.payment-instructions h4 {
+  margin-bottom: 0.65rem;
+  font-size: 0.95rem;
+}
+
+.clients-table-wrap {
+  overflow-x: auto;
+}
+
+.clients-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.clients-data-table th,
+.clients-data-table td {
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.clients-data-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+
+.clients-data-table tbody tr.client-row:hover {
+  background: var(--surface-2);
+}
+
+.client-detail-panel {
+  padding: 0.75rem 1rem;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  font-size: 0.88rem;
+}
+
+.client-detail-panel p {
+  margin: 0.35rem 0;
+}
+
+.clients-history-range {
+  padding: 0 1rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.payment-instructions ol {
+  margin: 0.5rem 0 0.75rem 1.1rem;
+  line-height: 1.55;
+}
+
+.payment-instructions .pay-ref {
+  display: inline-block;
+  margin-top: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+  background: rgba(249, 115, 22, 0.15);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.payment-wallet-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.payment-wallet-card.default {
+  border-color: rgba(249, 115, 22, 0.45);
+}
+
+.payment-wallet-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.payment-provider-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.payment-provider-card {
+  padding: 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.payment-provider-card h4 {
+  margin-bottom: 0.35rem;
+  font-size: 0.95rem;
+}
+
+.payment-provider-card p {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0;
 }
 
 @media (max-width: 900px) {

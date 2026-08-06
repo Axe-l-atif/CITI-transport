@@ -7,6 +7,18 @@ from pathlib import Path
 
 from flask import Flask, jsonify, redirect, request, send_from_directory
 
+from payments_service import (
+    demo_payment_instructions,
+    enrich_payment_methods,
+    format_phone_display,
+    merchant_config,
+    new_payment_ref,
+    normalize_phone,
+    payment_mode,
+    verify_wave_webhook_signature,
+    wave_checkout_session,
+)
+
 APP_DIR = Path(__file__).parent
 DB_PATH = APP_DIR / "cti.db"
 TRIP_DAYS = 7
@@ -146,6 +158,35 @@ def init_db():
             created_at TEXT NOT NULL,
             FOREIGN KEY (employee_id) REFERENCES employees(id)
         );
+
+        CREATE TABLE IF NOT EXISTS payment_wallets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            method TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            label TEXT,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            UNIQUE(employee_id, method, phone),
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS payment_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payment_ref TEXT UNIQUE NOT NULL,
+            employee_id INTEGER NOT NULL,
+            method TEXT NOT NULL,
+            payer_phone TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            purpose TEXT NOT NULL,
+            purpose_data TEXT,
+            wave_session_id TEXT,
+            wave_launch_url TEXT,
+            created_at TEXT NOT NULL,
+            paid_at TEXT,
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        );
         """
     )
     conn.commit()
@@ -221,6 +262,42 @@ def migrate_db(conn):
             payment_ref TEXT,
             status TEXT NOT NULL DEFAULT 'active',
             created_at TEXT NOT NULL,
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS payment_wallets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            method TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            label TEXT,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            UNIQUE(employee_id, method, phone),
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS payment_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payment_ref TEXT UNIQUE NOT NULL,
+            employee_id INTEGER NOT NULL,
+            method TEXT NOT NULL,
+            payer_phone TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            purpose TEXT NOT NULL,
+            purpose_data TEXT,
+            wave_session_id TEXT,
+            wave_launch_url TEXT,
+            created_at TEXT NOT NULL,
+            paid_at TEXT,
             FOREIGN KEY (employee_id) REFERENCES employees(id)
         )
         """
@@ -413,6 +490,11 @@ def sync_trips(conn):
 @app.route("/")
 def index():
     return send_from_directory(APP_DIR, "index.html")
+
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "service": "cti-transport-abidjan"}), 200
 
 
 def build_user_response(account):
@@ -1021,8 +1103,295 @@ def employee_subscriptions(employee_id):
     return jsonify(result)
 
 
+@app.route("/api/payment-config")
+def payment_config():
+    return jsonify(merchant_config())
+
+
 @app.route("/api/payment-methods")
 def list_payment_methods():
+    return jsonify(enrich_payment_methods(PAYMENT_METHODS))
+
+
+def public_base_url():
+    base = os.environ.get("CTI_PUBLIC_URL", "").strip()
+    if base:
+        return base.rstrip("/")
+    return request.url_root.rstrip("/")
+
+
+def get_payment_session(conn, payment_ref):
+    return conn.execute(
+        "SELECT * FROM payment_sessions WHERE payment_ref = ?",
+        (payment_ref,),
+    ).fetchone()
+
+
+@app.route("/api/employees/<int:employee_id>/payment-wallets", methods=["GET", "POST"])
+def payment_wallets(employee_id):
+    conn = get_db()
+    if request.method == "GET":
+        rows = conn.execute(
+            """
+            SELECT id, method, phone, label, is_default, created_at
+            FROM payment_wallets WHERE employee_id = ?
+            ORDER BY is_default DESC, created_at DESC
+            """,
+            (employee_id,),
+        ).fetchall()
+        conn.close()
+        return jsonify([dict(r) for r in rows])
+
+    data = request.get_json(silent=True) or {}
+    method = data.get("method")
+    phone = (data.get("phone") or "").strip()
+    label = (data.get("label") or "").strip()
+    set_default = bool(data.get("is_default"))
+
+    if method not in PAYMENT_METHODS:
+        conn.close()
+        return jsonify({"error": "Moyen de paiement invalide"}), 400
+    if len(normalize_phone(phone)) < 8:
+        conn.close()
+        return jsonify({"error": "Numéro invalide"}), 400
+
+    now = datetime.now().isoformat(timespec="seconds")
+    if set_default:
+        conn.execute(
+            "UPDATE payment_wallets SET is_default = 0 WHERE employee_id = ?",
+            (employee_id,),
+        )
+
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO payment_wallets (employee_id, method, phone, label, is_default, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (employee_id, method, phone, label or None, 1 if set_default else 0, now),
+        )
+        conn.commit()
+        wallet = conn.execute(
+            "SELECT * FROM payment_wallets WHERE id = ?", (cur.lastrowid,)
+        ).fetchone()
+        conn.close()
+        return jsonify(dict(wallet)), 201
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({"error": "Ce numéro est déjà enregistré pour ce moyen de paiement"}), 409
+
+
+@app.route("/api/employees/<int:employee_id>/payment-wallets/<int:wallet_id>", methods=["DELETE"])
+def delete_payment_wallet(employee_id, wallet_id):
+    conn = get_db()
+    conn.execute(
+        "DELETE FROM payment_wallets WHERE id = ? AND employee_id = ?",
+        (wallet_id, employee_id),
+    )
+    conn.commit()
+    deleted = conn.total_changes
+    conn.close()
+    if not deleted:
+        return jsonify({"error": "Compte introuvable"}), 404
+    return jsonify({"message": "Numéro retiré"})
+
+
+@app.route("/api/employees/<int:employee_id>/payment-wallets/<int:wallet_id>/default", methods=["PATCH"])
+def set_default_payment_wallet(employee_id, wallet_id):
+    conn = get_db()
+    wallet = conn.execute(
+        "SELECT id FROM payment_wallets WHERE id = ? AND employee_id = ?",
+        (wallet_id, employee_id),
+    ).fetchone()
+    if not wallet:
+        conn.close()
+        return jsonify({"error": "Compte introuvable"}), 404
+    conn.execute(
+        "UPDATE payment_wallets SET is_default = 0 WHERE employee_id = ?",
+        (employee_id,),
+    )
+    conn.execute(
+        "UPDATE payment_wallets SET is_default = 1 WHERE id = ?",
+        (wallet_id,),
+    )
+    conn.commit()
+    updated = conn.execute(
+        "SELECT * FROM payment_wallets WHERE id = ?", (wallet_id,)
+    ).fetchone()
+    conn.close()
+    return jsonify(dict(updated))
+
+
+@app.route("/api/payments/initiate", methods=["POST"])
+def initiate_payment():
+    data = request.get_json(silent=True) or {}
+    employee_id = data.get("employee_id")
+    method = data.get("payment_method")
+    payer_phone = (data.get("payment_phone") or "").strip()
+    amount = data.get("amount")
+    purpose = (data.get("purpose") or "reservation").strip()
+    purpose_data = data.get("purpose_data") or {}
+
+    if not all([employee_id, method, payer_phone, amount]):
+        return jsonify({"error": "Données de paiement incomplètes"}), 400
+    if method not in PAYMENT_METHODS:
+        return jsonify({"error": "Moyen de paiement invalide"}), 400
+    if len(normalize_phone(payer_phone)) < 8:
+        return jsonify({"error": "Numéro Wave ou Orange Money invalide"}), 400
+
+    amount = int(amount)
+    if amount < 0:
+        return jsonify({"error": "Montant invalide"}), 400
+
+    payment_ref = new_payment_ref()
+    now = datetime.now().isoformat(timespec="seconds")
+    base = public_base_url()
+    success_url = f"{base}/api/payments/return/success?ref={payment_ref}"
+    error_url = f"{base}/api/payments/return/error?ref={payment_ref}"
+
+    wave_launch_url = None
+    wave_session_id = None
+    instructions = None
+
+    if amount == 0:
+        status = "paid"
+        paid_at = now
+    elif method == "wave" and payment_mode() == "live":
+        wave_data, err = wave_checkout_session(
+            amount, payment_ref, success_url, error_url, payer_phone
+        )
+        if err:
+            return jsonify({"error": f"Wave : {err}"}), 502
+        wave_launch_url = wave_data.get("wave_launch_url")
+        wave_session_id = wave_data.get("id")
+        status = "pending"
+        paid_at = None
+    else:
+        status = "pending"
+        paid_at = None
+        instructions = demo_payment_instructions(method, amount, payment_ref, payer_phone)
+
+    conn = get_db()
+    conn.execute(
+        """
+        INSERT INTO payment_sessions (
+            payment_ref, employee_id, method, payer_phone, amount, status,
+            purpose, purpose_data, wave_session_id, wave_launch_url, created_at, paid_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            payment_ref, employee_id, method, payer_phone, amount, status,
+            purpose, json.dumps(purpose_data), wave_session_id, wave_launch_url,
+            now, paid_at,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify(
+        {
+            "payment_ref": payment_ref,
+            "status": status,
+            "amount": amount,
+            "method": method,
+            "wave_launch_url": wave_launch_url,
+            "instructions": instructions,
+            "mode": payment_mode(),
+        }
+    ), 201
+
+
+@app.route("/api/payments/<payment_ref>/status")
+def payment_status(payment_ref):
+    conn = get_db()
+    session = get_payment_session(conn, payment_ref)
+    conn.close()
+    if not session:
+        return jsonify({"error": "Paiement introuvable"}), 404
+    return jsonify(
+        {
+            "payment_ref": session["payment_ref"],
+            "status": session["status"],
+            "amount": session["amount"],
+            "method": session["method"],
+            "paid_at": session["paid_at"],
+        }
+    )
+
+
+@app.route("/api/payments/<payment_ref>/confirm", methods=["POST"])
+def confirm_payment(payment_ref):
+    """Confirmation manuelle en mode démo (transfert Wave / Orange Money)."""
+    if payment_mode() == "live":
+        return jsonify({"error": "Confirmation automatique en mode production"}), 400
+
+    conn = get_db()
+    session = get_payment_session(conn, payment_ref)
+    if not session:
+        conn.close()
+        return jsonify({"error": "Paiement introuvable"}), 404
+    if session["status"] == "paid":
+        conn.close()
+        return jsonify({"status": "paid", "message": "Paiement déjà confirmé"})
+    if session["amount"] == 0:
+        conn.close()
+        return jsonify({"status": "paid", "message": "Gratuit (abonnement)"})
+
+    now = datetime.now().isoformat(timespec="seconds")
+    conn.execute(
+        "UPDATE payment_sessions SET status = 'paid', paid_at = ? WHERE payment_ref = ?",
+        (now, payment_ref),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "paid", "message": "Paiement confirmé", "paid_at": now})
+
+
+@app.route("/api/payments/webhook/wave", methods=["POST"])
+def wave_webhook():
+    secret = os.environ.get("WAVE_WEBHOOK_SECRET", "").strip()
+    payload = request.get_data()
+    signature = request.headers.get("Wave-Signature", "")
+
+    if secret and not verify_wave_webhook_signature(payload, signature, secret):
+        return jsonify({"error": "Signature invalide"}), 403
+
+    try:
+        event = request.get_json(silent=True) or {}
+    except Exception:
+        return jsonify({"error": "Payload invalide"}), 400
+
+    ref = event.get("client_reference") or event.get("data", {}).get("client_reference")
+    status = event.get("type") or event.get("data", {}).get("checkout_status")
+
+    if ref and status in ("checkout.session.completed", "complete", "checkout.session.completed"):
+        conn = get_db()
+        now = datetime.now().isoformat(timespec="seconds")
+        conn.execute(
+            "UPDATE payment_sessions SET status = 'paid', paid_at = ? WHERE payment_ref = ?",
+            (now, ref),
+        )
+        conn.commit()
+        conn.close()
+
+    return jsonify({"received": True})
+
+
+@app.route("/api/payments/return/success")
+def payment_return_success():
+    ref = request.args.get("ref", "")
+    return redirect(f"/?payment=success&ref={ref}")
+
+
+@app.route("/api/payments/return/error")
+def payment_return_error():
+    ref = request.args.get("ref", "")
+    return redirect(f"/?payment=error&ref={ref}")
+
+
+@app.route("/api/payment-methods-legacy")
+def list_payment_methods_legacy():
     return jsonify(
         [
             {"id": key, **value}
@@ -1041,6 +1410,7 @@ def create_reservation():
     payment_phone = (data.get("payment_phone") or "").strip()
     pickup_stop = (data.get("pickup_stop") or "").strip()
     dropoff_stop = (data.get("dropoff_stop") or "").strip()
+    payment_ref = (data.get("payment_ref") or "").strip()
 
     if not all([trip_id, employee_id, seat_number, payment_method]):
         return jsonify(
@@ -1049,10 +1419,6 @@ def create_reservation():
 
     if payment_method not in PAYMENT_METHODS:
         return jsonify({"error": "Moyen de paiement invalide"}), 400
-
-    phone_digits = "".join(c for c in payment_phone if c.isdigit())
-    if len(phone_digits) < 8:
-        return jsonify({"error": "Saisissez votre numéro Wave ou Orange Money"}), 400
 
     conn = get_db()
     trip = conn.execute(
@@ -1100,8 +1466,35 @@ def create_reservation():
     if active_sub:
         amount = 0
 
-    payment_ref = f"CTI-{secrets.token_hex(4).upper()}"
-    payment_status = "paid" if amount == 0 else "paid"
+    payment_status_val = "paid"
+    if amount > 0:
+        if not payment_ref:
+            conn.close()
+            return jsonify({"error": "Effectuez d'abord le paiement Wave ou Orange Money"}), 400
+        session = get_payment_session(conn, payment_ref)
+        if not session:
+            conn.close()
+            return jsonify({"error": "Référence de paiement introuvable"}), 404
+        if session["employee_id"] != employee_id:
+            conn.close()
+            return jsonify({"error": "Paiement non associé à votre compte"}), 403
+        if session["status"] != "paid":
+            conn.close()
+            return jsonify({"error": "Paiement non confirmé. Terminez le transfert Wave ou Orange Money."}), 402
+        if session["amount"] != amount:
+            conn.close()
+            return jsonify({"error": "Montant du paiement incorrect"}), 400
+        if session["method"] != payment_method:
+            conn.close()
+            return jsonify({"error": "Moyen de paiement incompatible"}), 400
+        payment_phone = session["payer_phone"]
+    else:
+        if not payment_ref:
+            payment_ref = new_payment_ref("CTI-FREE")
+        phone_digits = normalize_phone(payment_phone)
+        if len(phone_digits) < 8:
+            payment_phone = payment_phone or "—"
+
     now = datetime.now().isoformat()
 
     cur = conn.cursor()
@@ -1116,7 +1509,7 @@ def create_reservation():
         """,
         (
             trip_id, employee_id, seat_number, now,
-            payment_method, amount, payment_status, payment_ref,
+            payment_method, amount, payment_status_val, payment_ref,
             pickup_stop or None, dropoff_stop or None, payment_phone,
         ),
     )
@@ -1130,7 +1523,7 @@ def create_reservation():
             "message": "Réservation confirmée" + (" (abonnement)" if amount == 0 else ""),
             "amount": amount,
             "payment_method": payment_method,
-            "payment_status": payment_status,
+            "payment_status": payment_status_val,
             "payment_ref": payment_ref,
             "payment_phone": payment_phone,
         }
@@ -1173,6 +1566,157 @@ def employee_reservations(employee_id):
     return jsonify([dict(r) for r in rows])
 
 
+def admin_history_start_date():
+    """Début de la fenêtre d'historique direction (2 mois glissants)."""
+    return (datetime.now().date() - timedelta(days=62)).isoformat()
+
+
+@app.route("/api/admin/clients")
+def admin_clients():
+    denied = require_direction_access()
+    if denied:
+        return denied
+
+    conn = get_db()
+    today = datetime.now().date().isoformat()
+    history_start = admin_history_start_date()
+
+    total_clients = conn.execute(
+        "SELECT COUNT(*) FROM accounts WHERE role = 'client'"
+    ).fetchone()[0]
+
+    client_rows = conn.execute(
+        """
+        SELECT
+            a.id AS account_id,
+            a.username,
+            a.display_name,
+            e.id AS employee_id,
+            e.matricule,
+            e.name,
+            e.department,
+            e.email,
+            (
+                SELECT COUNT(*) FROM reservations r WHERE r.employee_id = e.id
+            ) AS total_reservations,
+            (
+                SELECT COUNT(*)
+                FROM reservations r
+                JOIN trips t ON t.id = r.trip_id
+                WHERE r.employee_id = e.id AND t.date >= ?
+            ) AS reservations_2m,
+            (
+                SELECT COALESCE(SUM(r.amount), 0)
+                FROM reservations r
+                JOIN trips t ON t.id = r.trip_id
+                WHERE r.employee_id = e.id AND t.date >= ?
+                  AND r.payment_status IN ('paid', 'charged_to_company')
+            ) AS spent_2m,
+            (
+                SELECT MAX(t.date)
+                FROM reservations r
+                JOIN trips t ON t.id = r.trip_id
+                WHERE r.employee_id = e.id
+            ) AS last_trip_date,
+            (
+                SELECT s.plan
+                FROM subscriptions s
+                WHERE s.employee_id = e.id
+                  AND s.status = 'active'
+                  AND s.end_date >= ?
+                ORDER BY s.end_date DESC
+                LIMIT 1
+            ) AS active_plan
+        FROM accounts a
+        JOIN employees e ON e.id = a.employee_id
+        WHERE a.role = 'client'
+        ORDER BY e.name COLLATE NOCASE
+        """,
+        (history_start, history_start, today),
+    ).fetchall()
+
+    wallet_rows = conn.execute(
+        """
+        SELECT employee_id, method, phone, label, is_default
+        FROM payment_wallets
+        ORDER BY is_default DESC, method
+        """
+    ).fetchall()
+    wallets_by_employee = {}
+    for row in wallet_rows:
+        wallets_by_employee.setdefault(row["employee_id"], []).append(
+            {
+                "method": row["method"],
+                "phone": row["phone"],
+                "label": row["label"],
+                "is_default": bool(row["is_default"]),
+            }
+        )
+
+    history = conn.execute(
+        """
+        SELECT
+            r.id, r.seat_number, r.amount, r.payment_method, r.payment_status,
+            r.payment_ref, r.pickup_stop, r.dropoff_stop, r.payment_phone, r.created_at,
+            e.id AS employee_id, e.matricule, e.name AS employee_name, e.email,
+            a.username, a.display_name,
+            t.route, t.date, t.departure, t.arrival, t.driver,
+            v.name AS vehicle_name, v.plate, v.type AS vehicle_type
+        FROM reservations r
+        JOIN employees e ON e.id = r.employee_id
+        JOIN accounts a ON a.employee_id = e.id AND a.role = 'client'
+        JOIN trips t ON t.id = r.trip_id
+        JOIN vehicles v ON v.id = t.vehicle_id
+        WHERE t.date >= ?
+        ORDER BY t.date DESC, t.departure DESC, e.name COLLATE NOCASE
+        """,
+        (history_start,),
+    ).fetchall()
+
+    active_clients_2m = conn.execute(
+        """
+        SELECT COUNT(DISTINCT r.employee_id)
+        FROM reservations r
+        JOIN trips t ON t.id = r.trip_id
+        JOIN accounts a ON a.employee_id = r.employee_id AND a.role = 'client'
+        WHERE t.date >= ?
+        """,
+        (history_start,),
+    ).fetchone()[0]
+
+    total_reservations_2m = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM reservations r
+        JOIN trips t ON t.id = r.trip_id
+        JOIN accounts a ON a.employee_id = r.employee_id AND a.role = 'client'
+        WHERE t.date >= ?
+        """,
+        (history_start,),
+    ).fetchone()[0]
+
+    conn.close()
+
+    clients = []
+    for row in client_rows:
+        item = dict(row)
+        item["payment_wallets"] = wallets_by_employee.get(item["employee_id"], [])
+        item["active_plan"] = item["active_plan"] or None
+        clients.append(item)
+
+    return jsonify(
+        {
+            "total_clients": total_clients,
+            "active_clients_2m": active_clients_2m,
+            "total_reservations_2m": total_reservations_2m,
+            "history_from": history_start,
+            "history_to": today,
+            "clients": clients,
+            "history": [dict(h) for h in history],
+        }
+    )
+
+
 @app.route("/api/admin/overview")
 def admin_overview():
     denied = require_direction_access()
@@ -1206,6 +1750,9 @@ def admin_overview():
     ).fetchone()[0]
     vehicles = conn.execute("SELECT COUNT(*) FROM vehicles").fetchone()[0]
     employees = conn.execute("SELECT COUNT(*) FROM employees").fetchone()[0]
+    total_clients = conn.execute(
+        "SELECT COUNT(*) FROM accounts WHERE role = 'client'"
+    ).fetchone()[0]
     occupancy = round((today_reservations / total_capacity) * 100, 1) if total_capacity else 0
 
     fleet = conn.execute(
@@ -1287,6 +1834,7 @@ def admin_overview():
             "vehicles": vehicles,
             "fleet_count": vehicles,
             "employees": employees,
+            "total_clients": total_clients,
             "trip_days": TRIP_DAYS,
             "occupancy_rate": occupancy,
             "trips_completed_count": completed_count,

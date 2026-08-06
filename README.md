@@ -23,14 +23,19 @@ Ouvrir : http://127.0.0.1:5000
 
 Double-cliquer sur `start-public.bat` puis copier l'URL `https://....trycloudflare.com`.
 
-### Option 2 — Render.com (permanent, recommandé)
+### Option 2 — Render.com (lien fixe permanent, recommandé)
 
-1. Cliquez ici : **[Deploy to Render](https://render.com/deploy?repo=https://github.com/Axe-l-atif/CITI-transport/tree/cti-abidjan)**
-2. Connectez-vous avec **GitHub** (compte `Axe-l-atif`)
-3. Validez le déploiement du Blueprint (`render.yaml`)
-4. Attendez 2–3 minutes — votre URL sera du type `https://cti-transport-abidjan.onrender.com`
+**URL fixe à partager (WhatsApp, réseaux sociaux) :**
 
-Code source : [branche `cti-abidjan`](https://github.com/Axe-l-atif/CITI-transport/tree/cti-abidjan)
+**https://citi-transport.onrender.com**
+
+> Sur le plan gratuit, le site peut mettre ~30–60 s à répondre après une période d’inactivité (réveil automatique).
+
+1. Connectez-vous sur [Render](https://dashboard.render.com) avec GitHub (`Axe-l-atif`)
+2. Vérifiez que le service **citi-transport** est lié au repo `CITI-transport`, branche **main**
+3. Chaque push sur `main` redéploie automatiquement le site
+
+Code source : [GitHub — CITI-transport](https://github.com/Axe-l-atif/CITI-transport)
 
 ## Comptes de démonstration
 

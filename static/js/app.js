@@ -10,6 +10,9 @@ const state = {
     selectedDropoffStop: "",
     selectedSubscriptionPlan: null,
     selectedSubscriptionPayment: null,
+    paymentRef: null,
+    paymentWallets: [],
+    paymentConfig: null,
     view: "dashboard",
     profileTab: "info",
     historyTab: "trips",
@@ -86,6 +89,7 @@ const DIRECTION_TITLES = {
   trips: ["Planification", "Calendrier des lignes sur 7 jours"],
   vehicles: ["Véhicules", "Gérer la flotte — disponibles et en trajet"],
   drivers: ["Chauffeurs", "Suivi des missions et clients par véhicule"],
+  clients: ["Clients", "Registre, effectif total et historique sur 2 mois"],
   reservations: ["Finances", "Recettes Wave / Orange Money"],
 };
 
@@ -210,9 +214,15 @@ function renderClientSteps() {
 }
 
 function renderPaymentChips() {
-  document.getElementById("client-payments-info").innerHTML = state.paymentMethods
-    .map((m) => `<span class="chip">${m.icon} ${m.label}</span>`)
-    .join("");
+  document.getElementById("client-payments-info").innerHTML = `
+    <div class="payment-provider-grid">
+      ${state.paymentMethods.map((m) => `
+        <div class="payment-provider-card">
+          <h4>${m.icon} ${m.label}</h4>
+          <p>${m.description || PAYMENT_HINTS[m.id] || ""}</p>
+          ${m.merchant_phone ? `<p><small>Vers ${m.merchant_phone}</small></p>` : ""}
+        </div>`).join("")}
+    </div>`;
 }
 
 function renderDriverChecklist() {
@@ -1035,6 +1045,7 @@ function openPaymentModal() {
     return;
   }
   state.client.selectedPayment = null;
+  state.client.paymentRef = null;
 
   document.getElementById("payment-summary").innerHTML = `
     <div><strong>${trip.route}</strong></div>
@@ -1046,65 +1057,145 @@ function openPaymentModal() {
   document.getElementById("payment-methods").innerHTML = state.paymentMethods.map((m) => `
     <div class="payment-option" data-payment="${m.id}">
       <span class="icon">${m.icon}</span>
-      <div class="info"><strong>${m.label}</strong><span>${PAYMENT_HINTS[m.id] || ""}</span></div>
+      <div class="info">
+        <strong>${m.label}</strong>
+        <span>${m.description || PAYMENT_HINTS[m.id] || ""}</span>
+      </div>
     </div>`).join("");
 
-  document.getElementById("payment-phone").value = "";
+  const defaultWallet = state.client.paymentWallets.find((w) => w.is_default)
+    || state.client.paymentWallets[0];
+  document.getElementById("payment-phone").value = defaultWallet?.phone || "";
   document.getElementById("payment-phone-block").classList.remove("hidden");
+  document.getElementById("payment-instructions-block").classList.add("hidden");
+  document.getElementById("payment-instructions-block").innerHTML = "";
+  document.getElementById("pay-and-reserve").textContent = "Payer et réserver";
+  document.getElementById("pay-and-reserve").disabled = true;
 
   document.getElementById("payment-methods").querySelectorAll(".payment-option").forEach((el) => {
     el.addEventListener("click", () => {
       state.client.selectedPayment = el.dataset.payment;
       document.querySelectorAll(".payment-option").forEach((o) => o.classList.remove("selected"));
       el.classList.add("selected");
+      const wallet = state.client.paymentWallets.find((w) => w.method === el.dataset.payment && w.is_default)
+        || state.client.paymentWallets.find((w) => w.method === el.dataset.payment);
+      if (wallet) document.getElementById("payment-phone").value = wallet.phone;
       validatePaymentForm();
     });
   });
 
   document.getElementById("payment-phone").oninput = validatePaymentForm;
-  document.getElementById("pay-and-reserve").disabled = true;
   document.getElementById("payment-modal").classList.remove("hidden");
+}
+
+function renderPaymentInstructions(instructions) {
+  const block = document.getElementById("payment-instructions-block");
+  if (!instructions) {
+    block.classList.add("hidden");
+    block.innerHTML = "";
+    return;
+  }
+  block.classList.remove("hidden");
+  block.innerHTML = `
+    <h4>${instructions.title}</h4>
+    <ol>${instructions.steps.map((s) => `<li>${s}</li>`).join("")}</ol>
+    <div>Référence : <span class="pay-ref">${instructions.reference}</span></div>
+    ${instructions.ussd ? `<p style="margin-top:0.5rem"><strong>USSD :</strong> ${instructions.ussd}</p>` : ""}`;
 }
 
 function validatePaymentForm() {
   const phone = document.getElementById("payment-phone").value.replace(/\D/g, "");
-  document.getElementById("pay-and-reserve").disabled = !(
-    state.client.selectedPayment && phone.length >= 8
-  );
+  const btn = document.getElementById("pay-and-reserve");
+  if (state.client.paymentRef) {
+    btn.disabled = false;
+    return;
+  }
+  btn.disabled = !(state.client.selectedPayment && phone.length >= 8);
 }
 
 function closePaymentModal() {
   document.getElementById("payment-modal").classList.add("hidden");
   state.client.selectedPayment = null;
+  state.client.paymentRef = null;
+  renderPaymentInstructions(null);
 }
 
 async function confirmReservation() {
   if (!state.client.selectedSeat || !state.client.selectedPayment || !state.client.currentTrip) return;
   const payment_phone = document.getElementById("payment-phone").value.trim();
-  if (payment_phone.replace(/\D/g, "").length < 8) {
-    showToast("Numéro Wave ou Orange Money requis", "error");
-    return;
-  }
+  const trip = state.client.currentTrip;
+  const btn = document.getElementById("pay-and-reserve");
+
   try {
-    const result = await api("/api/reservations", {
-      method: "POST",
-      body: JSON.stringify({
-        trip_id: state.client.currentTrip.id,
-        employee_id: state.user.employee_id,
-        seat_number: state.client.selectedSeat,
-        payment_method: state.client.selectedPayment,
-        payment_phone,
-        pickup_stop: state.client.selectedPickupStop,
-        dropoff_stop: state.client.selectedDropoffStop,
-      }),
-    });
-    closePaymentModal();
-    const method = state.paymentMethods.find((m) => m.id === state.client.selectedPayment);
-    showToast(`Réservé — ${formatPrice(result.amount)} via ${method?.label} (${result.payment_ref})`);
-    await openClientTripDetail(state.client.currentTrip.id);
+    if (!state.client.paymentRef) {
+      if (payment_phone.replace(/\D/g, "").length < 8) {
+        showToast("Numéro Wave ou Orange Money requis", "error");
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "Initialisation…";
+      const payment = await api("/api/payments/initiate", {
+        method: "POST",
+        body: JSON.stringify({
+          employee_id: state.user.employee_id,
+          payment_method: state.client.selectedPayment,
+          payment_phone,
+          amount: trip.price,
+          purpose: "reservation",
+          purpose_data: {
+            trip_id: trip.id,
+            seat_number: state.client.selectedSeat,
+          },
+        }),
+      });
+
+      state.client.paymentRef = payment.payment_ref;
+
+      if (payment.status === "paid" || trip.price === 0) {
+        await finalizeReservation(payment.payment_ref);
+        return;
+      }
+
+      if (payment.wave_launch_url) {
+        window.location.href = payment.wave_launch_url;
+        return;
+      }
+
+      renderPaymentInstructions(payment.instructions);
+      btn.textContent = "J'ai payé — confirmer";
+      btn.disabled = false;
+      showToast("Effectuez le transfert puis confirmez", "info");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Vérification…";
+    await api(`/api/payments/${state.client.paymentRef}/confirm`, { method: "POST" });
+    await finalizeReservation(state.client.paymentRef);
   } catch (err) {
     showToast(err.message, "error");
+    btn.disabled = false;
+    btn.textContent = state.client.paymentRef ? "J'ai payé — confirmer" : "Payer et réserver";
   }
+}
+
+async function finalizeReservation(paymentRef) {
+  const result = await api("/api/reservations", {
+    method: "POST",
+    body: JSON.stringify({
+      trip_id: state.client.currentTrip.id,
+      employee_id: state.user.employee_id,
+      seat_number: state.client.selectedSeat,
+      payment_method: state.client.selectedPayment,
+      payment_ref: paymentRef,
+      pickup_stop: state.client.selectedPickupStop,
+      dropoff_stop: state.client.selectedDropoffStop,
+    }),
+  });
+  closePaymentModal();
+  const method = state.paymentMethods.find((m) => m.id === state.client.selectedPayment);
+  showToast(`Réservé — ${formatPrice(result.amount)} via ${method?.label} (${result.payment_ref})`);
+  await openClientTripDetail(state.client.currentTrip.id);
 }
 
 async function renderClientReservationsList(containerId = "client-my-reservations") {
@@ -1289,7 +1380,7 @@ function renderClientProfileInfo(el) {
       <dt>Nom affiché</dt><dd>${state.user.display_name}</dd>
       <dt>Identifiant</dt><dd>${state.user.username}</dd>
       <dt>N° employé</dt><dd>${state.user.employee_id || "—"}</dd>
-      <dt>Espace</dt><dd>Client CITI</dd>
+      <dt>Espace</dt><dd>Client CTI Abidjan</dd>
     </dl>
     <form id="client-profile-info-form" class="profile-form">
       <label>
@@ -1364,27 +1455,124 @@ async function renderClientProfilePayments(el) {
       state.paymentMethods = [];
     }
   }
-
-  let usedMethods = [];
-  try {
-    const reservations = await api(`/api/employees/${state.user.employee_id}/reservations`);
-    usedMethods = [...new Set(reservations.map((r) => r.payment_method).filter(Boolean))];
-  } catch {
-    usedMethods = [];
+  if (!state.client.paymentConfig) {
+    try {
+      state.client.paymentConfig = await api("/api/payment-config");
+    } catch {
+      state.client.paymentConfig = { mode: "demo" };
+    }
   }
+  try {
+    state.client.paymentWallets = await api(`/api/employees/${state.user.employee_id}/payment-wallets`);
+  } catch {
+    state.client.paymentWallets = [];
+  }
+
+  const modeLabel = state.client.paymentConfig.mode === "live"
+    ? "Paiement Wave API activé"
+    : "Mode démo — transfert manuel Wave / Orange Money";
 
   el.innerHTML = `
     <div class="card-header"><h3>Mode de paiements</h3></div>
-    <p class="text-muted" style="margin-bottom:1rem">Moyens acceptés pour vos réservations CITI.</p>
-    <div class="chips-row client-payment-methods-list">
+    <p class="text-muted" style="margin-bottom:1rem">${modeLabel}</p>
+
+    <div class="payment-provider-grid">
       ${state.paymentMethods.map((m) => `
-        <span class="chip payment-method-chip">${m.icon} ${m.label}</span>`).join("")}
+        <div class="payment-provider-card">
+          <h4>${m.icon} ${m.label}</h4>
+          <p>${m.description || ""}</p>
+          <p><small>Numéro CTI : ${m.merchant_phone || "—"}</small></p>
+        </div>`).join("")}
     </div>
-    ${usedMethods.length ? `
-      <h4 class="profile-section-title">Utilisés récemment</h4>
-      <div class="chips-row">
-        ${usedMethods.map((id) => `<span class="chip">${paymentMethodLabel(id)}</span>`).join("")}
-      </div>` : `<p class="text-muted" style="margin-top:1rem">Aucun paiement enregistré pour le moment.</p>`}`;
+
+    <h4 class="profile-section-title">Mes numéros enregistrés</h4>
+    <div id="client-payment-wallets-list">
+      ${state.client.paymentWallets.length ? state.client.paymentWallets.map((w) => `
+        <div class="payment-wallet-card ${w.is_default ? "default" : ""}" data-wallet-id="${w.id}">
+          <div>
+            <strong>${paymentMethodLabel(w.method)}</strong>
+            ${w.is_default ? '<span class="badge badge-success">Par défaut</span>' : ""}
+            <p class="text-muted">${w.phone}${w.label ? ` · ${w.label}` : ""}</p>
+          </div>
+          <div class="payment-wallet-actions">
+            ${!w.is_default ? `<button type="button" class="btn btn-ghost btn-sm" data-wallet-default="${w.id}">Défaut</button>` : ""}
+            <button type="button" class="btn btn-danger btn-sm" data-wallet-delete="${w.id}">Retirer</button>
+          </div>
+        </div>`).join("") : `<p class="text-muted">Aucun numéro enregistré.</p>`}
+    </div>
+
+    <h4 class="profile-section-title">Ajouter un numéro</h4>
+    <form id="client-add-wallet-form" class="profile-form">
+      <div class="direction-form-grid">
+        <label>
+          <span>Moyen de paiement</span>
+          <select id="wallet-method" required>
+            ${state.paymentMethods.map((m) => `<option value="${m.id}">${m.label}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          <span>Numéro (+225)</span>
+          <input type="tel" id="wallet-phone" required placeholder="07 XX XX XX XX" />
+        </label>
+        <label>
+          <span>Libellé (optionnel)</span>
+          <input type="text" id="wallet-label" placeholder="Perso, Pro…" />
+        </label>
+      </div>
+      <label class="client-option-toggle" style="margin-bottom:0.85rem">
+        <span>Définir par défaut</span>
+        <input type="checkbox" id="wallet-default" checked />
+        <span class="client-toggle-track"></span>
+      </label>
+      <button type="submit" class="btn btn-primary">Enregistrer ce numéro</button>
+    </form>`;
+
+  el.querySelector("#client-add-wallet-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await api(`/api/employees/${state.user.employee_id}/payment-wallets`, {
+        method: "POST",
+        body: JSON.stringify({
+          method: document.getElementById("wallet-method").value,
+          phone: document.getElementById("wallet-phone").value.trim(),
+          label: document.getElementById("wallet-label").value.trim(),
+          is_default: document.getElementById("wallet-default").checked,
+        }),
+      });
+      showToast("Numéro enregistré");
+      await renderClientProfilePayments(el);
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
+
+  el.querySelectorAll("[data-wallet-delete]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await api(`/api/employees/${state.user.employee_id}/payment-wallets/${btn.dataset.walletDelete}`, {
+          method: "DELETE",
+        });
+        showToast("Numéro retiré");
+        await renderClientProfilePayments(el);
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    });
+  });
+
+  el.querySelectorAll("[data-wallet-default]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await api(`/api/employees/${state.user.employee_id}/payment-wallets/${btn.dataset.walletDefault}/default`, {
+          method: "PATCH",
+        });
+        showToast("Numéro par défaut mis à jour");
+        await renderClientProfilePayments(el);
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    });
+  });
 }
 
 async function renderClientProfile() {
@@ -1603,8 +1791,36 @@ function setupClientNav() {
 }
 
 async function initClientApp() {
+  try {
+    state.client.paymentWallets = await api(`/api/employees/${state.user.employee_id}/payment-wallets`);
+  } catch {
+    state.client.paymentWallets = [];
+  }
   setClientView("dashboard");
   await renderClientDashboard();
+}
+
+async function handlePaymentReturnFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("payment");
+  const ref = params.get("ref");
+  if (!status || !ref) return;
+
+  window.history.replaceState({}, "", window.location.pathname);
+  if (status === "success") {
+    try {
+      const payment = await api(`/api/payments/${ref}/status`);
+      if (payment.status === "paid") {
+        showToast(`Paiement ${ref} confirmé`, "success");
+      } else {
+        showToast("Paiement Wave en cours de validation…", "info");
+      }
+    } catch {
+      showToast("Retour de paiement Wave reçu", "info");
+    }
+  } else if (status === "error") {
+    showToast("Paiement Wave annulé ou échoué", "error");
+  }
 }
 
 /* ─── Interface Chauffeur ─── */
@@ -1817,6 +2033,7 @@ async function renderDirectionDashboard() {
   );
 
   document.getElementById("direction-stats-grid").innerHTML = `
+    <div class="stat-card"><div class="value">${data.total_clients || 0}</div><div class="label">Clients inscrits</div></div>
     <div class="stat-card"><div class="value">${data.fleet_count || data.vehicles}</div><div class="label">Véhicules en flotte</div></div>
     <div class="stat-card"><div class="value">${data.today_reservations}</div><div class="label">Clients aujourd'hui</div></div>
     <div class="stat-card"><div class="value">${data.trips_completed_count || 0}</div><div class="label">Trajets effectués</div></div>
@@ -2019,6 +2236,72 @@ async function handleAddVehicle(e) {
   }
 }
 
+async function renderDirectionClients() {
+  const data = await api("/api/admin/clients");
+
+  document.getElementById("direction-clients-stats").innerHTML = `
+    <div class="stat-card"><div class="value">${data.total_clients}</div><div class="label">Clients inscrits (flotte)</div></div>
+    <div class="stat-card"><div class="value">${data.active_clients_2m}</div><div class="label">Clients actifs (2 mois)</div></div>
+    <div class="stat-card"><div class="value">${data.total_reservations_2m}</div><div class="label">Réservations (2 mois)</div></div>
+    <div class="stat-card"><div class="value">${formatDate(data.history_from)}</div><div class="label">Début historique</div></div>`;
+
+  document.getElementById("direction-clients-count-badge").textContent =
+    `${data.total_clients} client${data.total_clients > 1 ? "s" : ""}`;
+
+  const tbody = document.getElementById("direction-clients-tbody");
+  if (!data.clients.length) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><p>Aucun client inscrit.</p></div></td></tr>`;
+  } else {
+    tbody.innerHTML = data.clients.map((c) => {
+      const wallets = (c.payment_wallets || [])
+        .map((w) => `${paymentMethodLabel(w.method)} ${w.phone}${w.is_default ? " ★" : ""}`)
+        .join("<br>") || "—";
+      const detailId = `client-detail-${c.employee_id}`;
+      return `
+        <tr class="client-row" data-employee-id="${c.employee_id}">
+          <td><code>${c.matricule}</code></td>
+          <td><strong>${c.name}</strong></td>
+          <td>${c.username}</td>
+          <td>${c.email}</td>
+          <td>${c.total_reservations}</td>
+          <td>${c.reservations_2m}</td>
+          <td>${c.last_trip_date ? formatDate(c.last_trip_date) : "—"}</td>
+          <td>${c.active_plan ? c.active_plan : "—"}</td>
+          <td><button type="button" class="btn btn-ghost btn-sm client-detail-toggle" data-target="${detailId}">Détails</button></td>
+        </tr>
+        <tr class="client-detail-row hidden" id="${detailId}">
+          <td colspan="9">
+            <div class="client-detail-panel">
+              <p><strong>Département :</strong> ${c.department}</p>
+              <p><strong>Identifiant connexion :</strong> ${c.display_name} (mot de passe masqué)</p>
+              <p><strong>Portefeuilles :</strong><br>${wallets}</p>
+              <p><strong>Dépenses 2 mois :</strong> ${formatPrice(c.spent_2m || 0)}</p>
+            </div>
+          </td>
+        </tr>`;
+    }).join("");
+  }
+
+  document.querySelectorAll(".client-detail-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const row = document.getElementById(btn.dataset.target);
+      row?.classList.toggle("hidden");
+    });
+  });
+
+  document.getElementById("direction-clients-history-badge").textContent =
+    `${data.total_reservations_2m} trajet${data.total_reservations_2m > 1 ? "s" : ""}`;
+  document.getElementById("direction-clients-history-range").textContent =
+    `Période : du ${formatDate(data.history_from)} au ${formatDate(data.history_to)}`;
+
+  const historyEl = document.getElementById("direction-clients-history");
+  if (!data.history.length) {
+    historyEl.innerHTML = `<div class="empty-state"><p>Aucune réservation sur les 2 derniers mois.</p></div>`;
+    return;
+  }
+  historyEl.innerHTML = data.history.map((r) => renderReservationRow(r)).join("");
+}
+
 async function renderDirectionReservations() {
   const data = state.direction.data || await api("/api/admin/overview");
   renderPaymentSummary(data.reservations);
@@ -2040,6 +2323,7 @@ function setupDirectionNav() {
       if (view === "trips") await renderDirectionTrips();
       if (view === "vehicles") await renderDirectionVehicles();
       if (view === "drivers") await renderDirectionDrivers();
+      if (view === "clients") await renderDirectionClients();
       if (view === "reservations") await renderDirectionReservations();
     });
   });
@@ -2130,6 +2414,8 @@ async function init() {
   api("/api/payment-methods")
     .then((methods) => { state.paymentMethods = methods; })
     .catch((err) => console.error(err));
+
+  handlePaymentReturnFromUrl().catch(console.error);
 }
 
 init().catch((err) => {

@@ -1,10 +1,11 @@
 services:
   - type: web
-    name: cti-transport-abidjan
+    name: citi-transport
     runtime: python
     plan: free
     autoDeploy: true
-    branch: cti-abidjan
+    branch: main
+    healthCheckPath: /health
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python -m gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
     envVars:
@@ -12,3 +13,5 @@ services:
         value: "3.11.9"
       - key: CITI_DEBUG
         value: "0"
+      - key: CTI_PUBLIC_URL
+        value: https://citi-transport.onrender.com

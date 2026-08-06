@@ -27,18 +27,18 @@ if not exist "%CF%" (
 )
 
 set CITI_HOST=127.0.0.1
-set CITI_PORT=5000
+set CITI_PORT=5002
 set CITI_DEBUG=0
 set CITI_SERVER=waitress
 
-netstat -ano | findstr ":5000 " | findstr "LISTENING" >nul 2>&1
+netstat -ano | findstr ":5002 " | findstr "LISTENING" >nul 2>&1
 if errorlevel 1 (
   echo Demarrage du serveur CTI...
-  start "CTI Server" /MIN cmd /c "cd /d "%~dp0" && py app.py"
+  start "CTI Server" /MIN cmd /c "cd /d "%~dp0" && set CITI_PORT=5002 && py app.py"
   echo Attente du serveur...
   timeout /t 4 /nobreak >nul
 ) else (
-  echo Serveur deja actif sur le port 5000.
+  echo Serveur deja actif sur le port 5002.
 )
 
 echo.
@@ -48,4 +48,4 @@ echo  Partagez-la pour acceder a CTI Transport depuis Internet.
 echo  Ctrl+C = arreter le tunnel (le serveur reste actif)
 echo ====================================================
 echo.
-"%CF%" tunnel --url http://127.0.0.1:5000
+"%CF%" tunnel --url http://127.0.0.1:5002

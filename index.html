@@ -417,6 +417,7 @@
         <button class="nav-item" data-view="trips"><span class="nav-icon">🛣️</span> Planification</button>
         <button class="nav-item" data-view="vehicles"><span class="nav-icon">🚐</span> Véhicules</button>
         <button class="nav-item" data-view="drivers"><span class="nav-icon">👨‍✈️</span> Chauffeurs</button>
+        <button class="nav-item" data-view="clients"><span class="nav-icon">👥</span> Clients</button>
         <button class="nav-item" data-view="reservations"><span class="nav-icon">💰</span> Finances</button>
       </nav>
       <div class="sidebar-help">
@@ -554,6 +555,49 @@
         </div>
       </section>
 
+      <section id="direction-view-clients" class="view">
+        <div class="info-banner direction">
+          <span>👥</span>
+          <div>
+            <strong>Base clients CTI</strong>
+            <p>Données clients (sans mot de passe), effectif total et historique sur 2 mois</p>
+          </div>
+        </div>
+        <div class="stats-grid" id="direction-clients-stats"></div>
+        <div class="card" style="margin-bottom:1rem">
+          <div class="card-header">
+            <h3>Registre clients</h3>
+            <span class="badge badge-success" id="direction-clients-count-badge">0</span>
+          </div>
+          <div class="clients-table-wrap">
+            <table class="clients-data-table" id="direction-clients-table">
+              <thead>
+                <tr>
+                  <th>Matricule</th>
+                  <th>Nom</th>
+                  <th>Identifiant</th>
+                  <th>Email</th>
+                  <th>Réservations</th>
+                  <th>2 mois</th>
+                  <th>Dernier trajet</th>
+                  <th>Abonnement</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="direction-clients-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3>Historique des réservations — 2 mois</h3>
+            <span class="badge" id="direction-clients-history-badge">0</span>
+          </div>
+          <p class="clients-history-range" id="direction-clients-history-range"></p>
+          <div id="direction-clients-history" class="reservation-list"></div>
+        </div>
+      </section>
+
       <section id="direction-view-reservations" class="view">
         <div class="info-banner direction">
           <span>💰</span>
@@ -582,10 +626,11 @@
       <div id="payment-methods" class="payment-methods"></div>
       <div id="payment-phone-block" class="hidden">
         <label class="payment-phone-label">
-          <span>Numéro Wave ou Orange Money</span>
+          <span>Votre numéro Wave ou Orange Money</span>
           <input type="tel" id="payment-phone" placeholder="07 XX XX XX XX" autocomplete="tel" />
         </label>
       </div>
+      <div id="payment-instructions-block" class="payment-instructions hidden"></div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="cancel-payment">Annuler</button>
         <button class="btn btn-primary" id="pay-and-reserve" disabled>Confirmer et réserver</button>
