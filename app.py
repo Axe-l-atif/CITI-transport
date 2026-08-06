@@ -497,8 +497,9 @@ def ensure_db():
 
 @app.before_request
 def prepare_db():
-    if request.path != "/health":
-        ensure_db()
+    if request.path in ("/health", "/"):
+        return
+    ensure_db()
 
 
 @app.route("/")
